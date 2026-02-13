@@ -10,275 +10,210 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="HELOC Screening Prototype (Credit Risk)", layout="wide")
+st.set_page_config(page_title="HELOC Application Pre-Screening", layout="centered")
 
+# =========================
+# (A) ML model placeholder
+# =========================
 MODEL_PATH = "model.pkl"
 
-# =============================
-# Feature list (align to training order!)
-# =============================
-FEATURES = [
-    "ExternalRiskEstimate",
-    "MSinceOldestTradeOpen",
-    "MSinceMostRecentTradeOpen",
-    "AverageMInFile",
-    "NumSatisfactoryTrades",
-    "NumTrades60Ever2DerogPubRec",
-    "NumTrades90Ever2DerogPubRec",
-    "PercentTradesNeverDelq",
-    "MSinceMostRecentDelq",
-    "MaxDelq2PublicRecLast12M",
-    "MaxDelqEver",
-    "NumTotalTrades",
-    "NumTradesOpeninLast12M",
-    "PercentInstallTrades",
-    "MSinceMostRecentInqexcl7days",
-    "NumInqLast6M",
-    "NumInqLast6Mexcl7days",
-    "NetFractionRevolvingBurden",
-    "NetFractionInstallBurden",
-    "NumRevolvingTradesWBalance",
-    "NumInstallTradesWBalance",
-    "NumBank2NatlTradesWHighUtilization",
-    "PercentTradesWBalance",
-]
-
-# =============================
-# Helpers
-# =============================
 @st.cache_resource
 def load_model(path: str):
+    """Load trained model if available; otherwise return None."""
     if not os.path.exists(path):
         return None
     with open(path, "rb") as f:
         return pickle.load(f)
 
-def make_input_df(user_inputs: dict) -> pd.DataFrame:
-    row = {k: user_inputs.get(k) for k in FEATURES}
-    return pd.DataFrame([row], columns=FEATURES)
-
-def safe_predict_proba_bad(model, X: pd.DataFrame) -> float:
-    """
-    Return P(bad=1). Assumes sklearn-like classifier with predict_proba.
-    If your positive class is not at index 1, adjust here.
-    """
-    proba = model.predict_proba(X)
-    return float(proba[0, 1])
+model = load_model(MODEL_PATH)
 
 def sigmoid(z: float) -> float:
     return float(1 / (1 + np.exp(-z)))
 
-# =============================
-# UI
-# =============================
-st.title("HELOC Screening Decision Support (Prototype)")
-st.caption("Outputs a screening recommendation based on estimated probability of **bad = 1** (higher = riskier).")
+def predict_prob_bad(inputs: dict) -> float:
+    """
+    Return P(bad = 1). Higher means riskier.
 
-model = load_model(MODEL_PATH)
+    ✅ CURRENT: rule-based demo (so prototype runs without ML)
+    ✅ TODO: replace with real ML model:
+        - build a DataFrame in training feature order
+        - prob_bad = model.predict_proba(X)[0, 1]
+    """
+    if model is not None:
+        # -----------------------------
+        # TODO: Replace with your model
+        # -----------------------------
+        # Example skeleton:
+        # X = pd.DataFrame([inputs])  # only works if columns match training exactly
+        # prob_bad = float(model.predict_proba(X)[0, 1])
+        # return prob_bad
+        pass
 
-# Delinquency code mappings (from your provided tables)
-MAXDELQ12M_OPTIONS = [
-    (7, "Current and never delinquent (Best)"),
-    (4, "30 days delinquent"),
-    (3, "60 days delinquent"),
-    (2, "90 days delinquent"),
-    (1, "120+ days delinquent"),
-    (0, "Derogatory comment (Worst)"),
-    (5, "Unknown delinquency (5)"),
-    (6, "Unknown delinquency (6)"),
-    (8, "All other (8)"),
-    (9, "All other (9)"),
-]
+    # ---- Demo risk score (NOT a real credit model) ----
+    score = 0.0
 
-MAXDELQEVER_OPTIONS = [
-    (8, "Current and never delinquent (Best)"),
-    (6, "30 days delinquent"),
-    (5, "60 days delinquent"),
-    (4, "90 days delinquent"),
-    (3, "120+ days delinquent"),
-    (2, "Derogatory comment"),
-    (7, "Unknown delinquency"),
-    (9, "All other"),
-    (1, "No such value (rare)"),
-]
+    # ExternalRiskEstimate: higher is better -> reduces risk
+    score += -0.04 * inputs["ExternalRiskEstimate"]
 
-col_left, col_right = st.columns([1, 1])
+    # Utilization: higher is worse -> increases risk
+    score += 2.0 * inputs["NetFractionRevolvingBurden"]
 
-with col_left:
-    st.subheader("Applicant Inputs")
+    # Recent inquiries: more is worse -> increases risk
+    score += 0.18 * inputs["NumInqLast6M"]
 
-    # NOTE: Ranges below are reasonable defaults for demo.
-    # Adjust after you check your dataset distributions (Task 2).
-    ExternalRiskEstimate = st.slider("ExternalRiskEstimate (higher = lower risk)", 0, 100, 70, 1)
+    # Months since delinquency: longer is better -> reduces risk
+    score += -0.01 * inputs["MSinceMostRecentDelq"]
 
-    MSinceOldestTradeOpen = st.number_input("Months Since Oldest Trade Open", min_value=0, value=120, step=1)
-    MSinceMostRecentTradeOpen = st.number_input("Months Since Most Recent Trade Open", min_value=0, value=12, step=1)
-    AverageMInFile = st.number_input("Average Months in File", min_value=0, value=60, step=1)
+    # Last 12M delinquency severity code: lower is worse
+    md12 = inputs["MaxDelq2PublicRecLast12M"]
+    if md12 in [0, 1, 2]:
+        score += 1.2
+    elif md12 in [3, 4]:
+        score += 0.6
 
-    NumSatisfactoryTrades = st.number_input("Num Satisfactory Trades", min_value=0, value=10, step=1)
-    NumTotalTrades = st.number_input("Num Total Trades", min_value=0, value=15, step=1)
-    NumTradesOpeninLast12M = st.number_input("Trades Opened in Last 12 Months", min_value=0, value=1, step=1)
+    # Credit history length (years): longer is better -> reduces risk
+    score += -0.02 * inputs["CreditHistoryYears"]
 
-    PercentTradesNeverDelq = st.slider("Percent Trades Never Delinquent", 0.0, 100.0, 95.0, 0.5)
-    MSinceMostRecentDelq = st.number_input("Months Since Most Recent Delinquency", min_value=0, value=36, step=1)
+    return sigmoid(score)
 
-    # Encoded delinquency fields
-    MaxDelq2PublicRecLast12M = st.selectbox(
-        "MaxDelq2PublicRecLast12M (Worst status in last 12M)",
-        options=MAXDELQ12M_OPTIONS,
-        format_func=lambda x: f"{x[0]} — {x[1]}",
-        index=0,
-    )[0]
-
-    MaxDelqEver = st.selectbox(
-        "MaxDelqEver (Worst status ever)",
-        options=MAXDELQEVER_OPTIONS,
-        format_func=lambda x: f"{x[0]} — {x[1]}",
-        index=0,
-    )[0]
-
-    NumTrades60Ever2DerogPubRec = st.number_input("Num Trades 60+ Ever (Derog/Public Record)", min_value=0, value=0, step=1)
-    NumTrades90Ever2DerogPubRec = st.number_input("Num Trades 90+ Ever (Derog/Public Record)", min_value=0, value=0, step=1)
-
-    # Inquiries
-    MSinceMostRecentInqexcl7days = st.number_input("Months Since Most Recent Inquiry (excl 7 days)", min_value=0, value=3, step=1)
-    NumInqLast6M = st.number_input("Num Inquiries Last 6 Months", min_value=0, value=1, step=1)
-    NumInqLast6Mexcl7days = st.number_input("Num Inquiries Last 6 Months (excl 7 days)", min_value=0, value=1, step=1)
-
-    # Utilization / burden
-    NetFractionRevolvingBurden = st.slider("Net Fraction Revolving Burden (higher = higher risk)", 0.0, 1.0, 0.25, 0.01)
-    NetFractionInstallBurden = st.slider("Net Fraction Installment Burden (higher = higher risk)", 0.0, 1.0, 0.15, 0.01)
-
-    NumRevolvingTradesWBalance = st.number_input("Num Revolving Trades with Balance", min_value=0, value=2, step=1)
-    NumInstallTradesWBalance = st.number_input("Num Installment Trades with Balance", min_value=0, value=2, step=1)
-
-    NumBank2NatlTradesWHighUtilization = st.number_input("Num Bank/Natl Trades with High Utilization", min_value=0, value=0, step=1)
-    PercentInstallTrades = st.slider("Percent Installment Trades", 0.0, 100.0, 40.0, 0.5)
-    PercentTradesWBalance = st.slider("Percent Trades with Balance", 0.0, 100.0, 60.0, 0.5)
-
-    st.divider()
-    deny_threshold = st.slider(
-        "Deny Threshold (if P(bad=1) ≥ threshold → recommend Screen Out)",
-        0.0, 1.0, 0.80, 0.01
-    )
-
-    user_inputs = {
-        "ExternalRiskEstimate": ExternalRiskEstimate,
-        "MSinceOldestTradeOpen": MSinceOldestTradeOpen,
-        "MSinceMostRecentTradeOpen": MSinceMostRecentTradeOpen,
-        "AverageMInFile": AverageMInFile,
-        "NumSatisfactoryTrades": NumSatisfactoryTrades,
-        "NumTrades60Ever2DerogPubRec": NumTrades60Ever2DerogPubRec,
-        "NumTrades90Ever2DerogPubRec": NumTrades90Ever2DerogPubRec,
-        "PercentTradesNeverDelq": PercentTradesNeverDelq,
-        "MSinceMostRecentDelq": MSinceMostRecentDelq,
-        "MaxDelq2PublicRecLast12M": MaxDelq2PublicRecLast12M,
-        "MaxDelqEver": MaxDelqEver,
-        "NumTotalTrades": NumTotalTrades,
-        "NumTradesOpeninLast12M": NumTradesOpeninLast12M,
-        "PercentInstallTrades": PercentInstallTrades,
-        "MSinceMostRecentInqexcl7days": MSinceMostRecentInqexcl7days,
-        "NumInqLast6M": NumInqLast6M,
-        "NumInqLast6Mexcl7days": NumInqLast6Mexcl7days,
-        "NetFractionRevolvingBurden": NetFractionRevolvingBurden,
-        "NetFractionInstallBurden": NetFractionInstallBurden,
-        "NumRevolvingTradesWBalance": NumRevolvingTradesWBalance,
-        "NumInstallTradesWBalance": NumInstallTradesWBalance,
-        "NumBank2NatlTradesWHighUtilization": NumBank2NatlTradesWHighUtilization,
-        "PercentTradesWBalance": PercentTradesWBalance,
-    }
-
-    X = make_input_df(user_inputs)
-    st.markdown("**Model Input (debug view)**")
-    st.dataframe(X, use_container_width=True)
-
-with col_right:
-    st.subheader("Screening Output")
-
-    if model is None:
-        st.warning(
-            "No trained model found (model.pkl). Running in DEMO mode.\n\n"
-            "To connect your ML results: place your trained sklearn model at ./model.pkl "
-            "and ensure FEATURES matches the training feature order."
-        )
-
-        # Simple demo risk score (NOT a real credit model)
-        demo_score = (
-            -0.03 * ExternalRiskEstimate
-            + 2.2 * NetFractionRevolvingBurden
-            + 1.4 * NetFractionInstallBurden
-            + 0.12 * NumInqLast6M
-            + 0.15 * NumBank2NatlTradesWHighUtilization
-            - 0.01 * MSinceOldestTradeOpen
-            - 0.008 * MSinceMostRecentDelq
-            - 0.02 * PercentTradesNeverDelq
-            + 0.18 * NumTrades90Ever2DerogPubRec
-            + 0.10 * NumTrades60Ever2DerogPubRec
-        )
-
-        # Delinquency codes: smaller is generally worse → add risk when code is low
-        if MaxDelq2PublicRecLast12M <= 2:
-            demo_score += 1.2
-        elif MaxDelq2PublicRecLast12M <= 4:
-            demo_score += 0.6
-
-        if MaxDelqEver <= 4:
-            demo_score += 0.8
-        elif MaxDelqEver <= 6:
-            demo_score += 0.4
-
-        prob_bad = sigmoid(demo_score)
-
-    else:
-        try:
-            prob_bad = safe_predict_proba_bad(model, X)
-        except Exception as e:
-            st.error(f"Model loaded but prediction failed: {e}")
-            st.stop()
-
-    recommendation = "Screen Out (Deny)" if prob_bad >= deny_threshold else "Escalate for Manual Review"
-
-    st.metric(label="Estimated Probability of Bad Outcome (bad = 1)", value=f"{prob_bad:.1%}")
-    st.markdown(f"### Recommendation: **{recommendation}**")
-
-    st.divider()
-    st.subheader("Explanation (MVP)")
-
-    # Lightweight rule-based narrative consistent with feature direction
+# =========================
+# (B) Explanation generator
+# =========================
+def build_reasons(inputs: dict) -> tuple[list[str], list[str]]:
+    """
+    Return (reasons_for_result, improvement_tips) in plain language.
+    """
     reasons = []
-    if ExternalRiskEstimate < 50:
-        reasons.append("Lower ExternalRiskEstimate suggests elevated baseline credit risk.")
-    if NetFractionRevolvingBurden > 0.35:
-        reasons.append("High revolving burden indicates higher utilization/financial strain.")
-    if NumInqLast6M >= 4:
-        reasons.append("Multiple recent inquiries may indicate increased credit-seeking behavior.")
-    if MSinceMostRecentDelq < 12:
-        reasons.append("Recent delinquency (few months since last delinquency) increases risk.")
-    if MaxDelq2PublicRecLast12M in [0, 1, 2]:
-        reasons.append("Severe delinquency status in the last 12 months materially increases risk.")
-    if not reasons:
-        reasons.append("Overall profile shows relatively low risk signals based on key indicators.")
-
-    for r in reasons[:4]:
-        st.write(f"- {r}")
-
-    st.subheader("How to Improve (MVP)")
     tips = []
-    if NetFractionRevolvingBurden > 0.35:
-        tips.append("Reduce revolving balances to lower utilization ratios.")
-    if NumInqLast6M >= 3:
-        tips.append("Avoid new credit inquiries for 6–12 months if possible.")
-    if MSinceMostRecentDelq < 12 or MaxDelq2PublicRecLast12M in [0, 1, 2, 3, 4]:
-        tips.append("Maintain on-time payments to increase months since last delinquency.")
-    if ExternalRiskEstimate < 50:
-        tips.append("Focus on improving overall credit standing (e.g., reduce utilization, pay on time).")
-    if not tips:
-        tips = ["Maintain current financial profile and provide complete documentation for review."]
-    for t in tips[:4]:
-        st.write(f"- {t}")
+
+    # Convert utilization to %
+    util_pct = int(round(inputs["NetFractionRevolvingBurden"] * 100))
+
+    # Positive factors (good)
+    if inputs["ExternalRiskEstimate"] >= 70:
+        reasons.append("Your credit risk score is relatively strong.")
+    if util_pct <= 30:
+        reasons.append("Your credit card utilization appears healthy (lower financial strain).")
+    if inputs["NumInqLast6M"] <= 1:
+        reasons.append("You have limited recent credit inquiries.")
+    if inputs["MSinceMostRecentDelq"] >= 24:
+        reasons.append("It has been a long time since your most recent missed payment.")
+    if inputs["CreditHistoryYears"] >= 5:
+        reasons.append("You have a reasonably established credit history.")
+
+    # Risk factors (bad)
+    md12 = inputs["MaxDelq2PublicRecLast12M"]
+    if md12 in [0, 1, 2, 3, 4]:
+        reasons.append("Recent delinquency signals in the last 12 months increase perceived risk.")
+        tips.append("Maintain on-time payments to increase the months since the last delinquency.")
+    if util_pct > 35:
+        tips.append("Reduce revolving balances to lower utilization.")
+    if inputs["NumInqLast6M"] >= 3:
+        tips.append("Avoid new credit applications/inquiries for 6–12 months if possible.")
+    if inputs["ExternalRiskEstimate"] < 50:
+        tips.append("Improve overall credit standing (e.g., on-time payments and lower utilization).")
+    if inputs["CreditHistoryYears"] < 2:
+        tips.append("Build credit history length through consistent responsible account management.")
+
+    # De-duplicate while preserving order
+    def dedup(xs):
+        seen = set()
+        out = []
+        for x in xs:
+            if x not in seen:
+                out.append(x)
+                seen.add(x)
+        return out
+
+    reasons = dedup(reasons)
+    tips = dedup(tips)
+
+    # Keep it short for applicants
+    reasons = reasons[:4] if len(reasons) > 0 else ["We did not detect strong risk signals based on the provided information."]
+    tips = tips[:3] if len(tips) > 0 else ["Continue maintaining a stable financial profile and provide complete documentation."]
+
+    return reasons, tips
+
+# =========================
+# (C) Applicant-facing UI
+# =========================
+st.title("HELOC Application Pre-Screening (Prototype)")
+st.caption("A simple pre-screening tool for applicants. This is **not** the final decision; a loan officer review may still be required.")
+
+st.subheader("1) Provide a few simple details")
+
+ExternalRiskEstimate = st.slider("Credit risk score (higher is better)", 0, 100, 70, 1)
+
+CreditHistoryYears = st.slider("Credit history length (years)", 0, 30, 8, 1)
+
+MSinceMostRecentDelq = st.slider("Months since your most recent missed payment", 0, 120, 36, 1)
+
+util_pct = st.slider("Credit card utilization / burden (%)", 0, 100, 25, 1)
+NetFractionRevolvingBurden = util_pct / 100.0
+
+NumInqLast6M = st.slider("New credit applications/inquiries in the last 6 months", 0, 10, 1, 1)
+
+MaxDelq2PublicRecLast12M = st.selectbox(
+    "Worst delinquency status in the last 12 months",
+    options=[
+        (7, "Current / never delinquent"),
+        (4, "30 days delinquent"),
+        (3, "60 days delinquent"),
+        (2, "90 days delinquent"),
+        (1, "120+ days delinquent"),
+        (0, "Derogatory comment"),
+        (5, "Unknown / not sure"),
+        (6, "Unknown / not sure"),
+        (8, "Other"),
+        (9, "Other"),
+    ],
+    format_func=lambda x: x[1],
+    index=0
+)[0]
+
+inputs = {
+    "ExternalRiskEstimate": ExternalRiskEstimate,
+    "CreditHistoryYears": CreditHistoryYears,
+    "MSinceMostRecentDelq": MSinceMostRecentDelq,
+    "NetFractionRevolvingBurden": NetFractionRevolvingBurden,
+    "NumInqLast6M": NumInqLast6M,
+    "MaxDelq2PublicRecLast12M": MaxDelq2PublicRecLast12M,
+}
+
+st.divider()
+
+st.subheader("2) Screening result")
+
+# You can tune this later with model performance + business risk appetite
+DENY_THRESHOLD = 0.80  # higher threshold reduces false negatives (wrongly rejecting good applicants)
+
+prob_bad = predict_prob_bad(inputs)
+
+# Applicant-friendly decision language
+if prob_bad >= DENY_THRESHOLD:
+    decision = "Not Approved for Fast-Track (Please improve and/or request manual review)"
+else:
+    decision = "Pass Pre-Screening (Proceed to manual review)"
+
+st.markdown(f"### **Result: {decision}**")
+
+# Explain reasons in plain language
+reasons, tips = build_reasons(inputs)
+
+st.markdown("**Why this result? (Key factors)**")
+for r in reasons:
+    st.write(f"- {r}")
+
+st.markdown("**What you can do next (Suggestions)**")
+for t in tips:
+    st.write(f"- {t}")
+
+with st.expander("Optional: show risk probability (for demo / internal use)"):
+    st.write(f"Estimated probability of **bad outcome (bad = 1)**: **{prob_bad:.1%}**")
+    st.write(f"(Internal deny threshold: {DENY_THRESHOLD:.0%})")
 
 st.divider()
 st.caption(
-    "Disclaimer: This tool provides a screening recommendation and does not replace final human review. "
-    "All decisions remain subject to bank policy and regulatory requirements."
+    "Disclaimer: This prototype provides a pre-screening recommendation and does not replace final human review. "
+    "Final lending decisions remain subject to bank policy and regulatory requirements."
 )
