@@ -346,74 +346,132 @@ if app_mode == "Applicant View":
     st.header("📋 Application Screening")
     st.markdown("Please provide the following information for initial screening evaluation.")
     
-    # Input form
+    # Input form with clearer structure
     col1, col2 = st.columns(2)
     
     with col1:
-        credit_score = st.slider(
-            "Credit Risk Score",
-            min_value=0,
-            max_value=100,
-            value=70,
-            help="Higher scores indicate lower risk (0-100)"
+        # 1. Credit Risk Score
+        st.markdown("**1. Your Credit Risk Profile**")
+        credit_score_option = st.selectbox(
+            "How would you rate your credit standing?",
+            options=[
+                "Excellent (90-100) - Very strong credit history",
+                "Good (75-89) - Strong credit profile",
+                "Fair (55-74) - Acceptable credit record",
+                "Poor (Below 55) - Shows credit challenges"
+            ],
+            index=1,
+            help="Select the option that best describes your overall credit situation"
         )
+        credit_score_map = {
+            "Excellent (90-100) - Very strong credit history": 95,
+            "Good (75-89) - Strong credit profile": 82,
+            "Fair (55-74) - Acceptable credit record": 65,
+            "Poor (Below 55) - Shows credit challenges": 45
+        }
+        credit_score = credit_score_map[credit_score_option]
         
+        # 2. Credit History Length
+        st.markdown("**2. Credit History Length**")
         credit_years = st.selectbox(
             "How long have you had credit accounts?",
             options=[
-                "Less than 2 years",
-                "2-5 years",
-                "5-10 years",
-                "10-15 years",
-                "15+ years"
+                "Less than 2 years - New to credit",
+                "2-5 years - Building credit",
+                "5-10 years - Established history",
+                "10-15 years - Strong history",
+                "15+ years - Extensive history"
             ],
             index=2,
-            help="Total credit history length"
+            help="Select your total credit account history duration"
         )
+        credit_years_map = {
+            "Less than 2 years - New to credit": 1,
+            "2-5 years - Building credit": 3,
+            "5-10 years - Established history": 7,
+            "10-15 years - Strong history": 12,
+            "15+ years - Extensive history": 20
+        }
+        credit_years_value = credit_years_map[credit_years]
         
-        utilization = st.slider(
-            "Credit Utilization",
-            min_value=0,
-            max_value=100,
-            value=25,
-            step=5,
-            help="Percentage of available credit you typically use"
+        # 3. Credit Card Usage
+        st.markdown("**3. Credit Card Utilization**")
+        utilization_option = st.selectbox(
+            "What percentage of your credit limit do you typically use?",
+            options=[
+                "Very Low (0-20%) - Excellent management",
+                "Low (21-40%) - Good management",
+                "Moderate (41-60%) - Acceptable",
+                "High (61-80%) - Some concern",
+                "Very High (81-100%) - High risk"
+            ],
+            index=0,
+            help="Select how much of your available credit you usually use"
         )
+        utilization_map = {
+            "Very Low (0-20%) - Excellent management": 10,
+            "Low (21-40%) - Good management": 30,
+            "Moderate (41-60%) - Acceptable": 50,
+            "High (61-80%) - Some concern": 70,
+            "Very High (81-100%) - High risk": 90
+        }
+        utilization = utilization_map[utilization_option]
     
     with col2:
-        months_since = st.slider(
-            "Months Since Last Payment Issue",
-            min_value=-7,
-            max_value=120,
-            value=24,
-            help="-7 = Never had issues, 0+ = Months ago"
-        )
-        
-        inquiries = st.slider(
-            "Credit Inquiries (Last 6 Months)",
-            min_value=0,
-            max_value=10,
-            value=1,
-            help="Number of times credit was checked for new applications"
-        )
-        
+        # 4. Payment History - Recent Issues
+        st.markdown("**4. Recent Payment History** (Last 12 months)")
         recent_delinq = st.selectbox(
-            "Worst Payment Issue in Last 12 Months",
+            "Have you had any payment issues?",
             options=list(DELINQUENCY_LABELS.values()),
             index=0,
-            help="Your most severe payment issue in recent period"
+            help="Select your worst payment status in the last 12 months"
         )
-    
-    # Convert inputs to model format
-    credit_years_map = {
-        "Less than 2 years": 1,
-        "2-5 years": 3,
-        "5-10 years": 7,
-        "10-15 years": 12,
-        "15+ years": 20
-    }
-    
-    credit_years_value = credit_years_map[credit_years]
+        
+        # 5. Time Since Last Payment Problem
+        st.markdown("**5. Payment Issue Recency**")
+        months_since_option = st.selectbox(
+            "When was your last payment issue?",
+            options=[
+                "Never had payment issues - Perfect record",
+                "3-6 months ago - Recent issue",
+                "6-12 months ago - Somewhat recent",
+                "1-2 years ago - Resolved",
+                "2-3 years ago - Well resolved",
+                "3+ years ago - Long time ago"
+            ],
+            index=0,
+            help="Select how long ago you had your most recent payment problem"
+        )
+        months_since_map = {
+            "Never had payment issues - Perfect record": -7,
+            "3-6 months ago - Recent issue": 4,
+            "6-12 months ago - Somewhat recent": 9,
+            "1-2 years ago - Resolved": 18,
+            "2-3 years ago - Well resolved": 30,
+            "3+ years ago - Long time ago": 48
+        }
+        months_since = months_since_map[months_since_option]
+        
+        # 6. Credit Inquiries
+        st.markdown("**6. Recent Credit Inquiries** (Last 6 months)")
+        inquiries_option = st.selectbox(
+            "How many times has your credit been checked?",
+            options=[
+                "None (0) - No new credit applications",
+                "1-2 - Few recent applications",
+                "3-5 - Several applications",
+                "6+ - Multiple recent applications"
+            ],
+            index=0,
+            help="Number of times lenders checked your credit recently"
+        )
+        inquiries_map = {
+            "None (0) - No new credit applications": 0,
+            "1-2 - Few recent applications": 1,
+            "3-5 - Several applications": 4,
+            "6+ - Multiple recent applications": 7
+        }
+        inquiries = inquiries_map[inquiries_option]
     
     # Inputs for the model (only actual model features)
     inputs = {
