@@ -280,6 +280,8 @@ if 'months_since' not in st.session_state:
     st.session_state.months_since = 24
 if 'inquiries' not in st.session_state:
     st.session_state.inquiries = 1
+if 'recent_delinq' not in st.session_state:
+    st.session_state.recent_delinq = "Current / Never Delinquent"
 if 'decision_threshold' not in st.session_state:
     st.session_state.decision_threshold = None  # Will be set to default_threshold
 
@@ -455,8 +457,10 @@ if app_mode == "Applicant View":
             options=list(DELINQUENCY_LABELS.values()),
             index=0,
             help="Select your worst payment status in the last 12 months",
-            key="applicant_recent_delinq"
+            key="applicant_recent_delinq",
+            on_change=lambda: setattr(st.session_state, 'recent_delinq', st.session_state.applicant_recent_delinq)
         )
+        st.session_state.recent_delinq = recent_delinq
         
         # 5. Time Since Last Payment Problem
         st.markdown("**5. Payment Issue Recency**")
@@ -636,9 +640,10 @@ else:  # Loan Officer Review
         delinq_status = st.selectbox(
             "Recent Delinquency Status",
             options=list(DELINQUENCY_LABELS.values()),
-            index=0,
+            index=list(DELINQUENCY_LABELS.values()).index(st.session_state.recent_delinq) if st.session_state.recent_delinq in DELINQUENCY_LABELS.values() else 0,
             key="officer_delinq"
         )
+        st.session_state.recent_delinq = delinq_status
     
     with col3:
         st.markdown("### Decision Settings")
