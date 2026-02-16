@@ -274,6 +274,8 @@ if 'months_since' not in st.session_state:
     st.session_state.months_since = 24
 if 'inquiries' not in st.session_state:
     st.session_state.inquiries = 1
+if 'decision_threshold' not in st.session_state:
+    st.session_state.decision_threshold = None  # Will be set to default_threshold
 
 # Load model artifacts
 artifacts = load_model_artifacts()
@@ -304,16 +306,20 @@ with st.sidebar:
     if app_mode == "Loan Officer Review":
         st.divider()
         st.markdown("### Decision Threshold")
-        threshold = st.slider(
+        decision_threshold = st.slider(
             "Adjust approval threshold (lower = approve more)",
             min_value=0.3,
             max_value=0.9,
-            value=default_threshold,
+            value=st.session_state.decision_threshold if st.session_state.decision_threshold else default_threshold,
             step=0.05,
             help="Probability threshold for 'Pass Pre-Screening' decision"
         )
+        st.session_state.decision_threshold = decision_threshold
     else:
-        threshold = default_threshold
+        # Use threshold from session state, default to model's default
+        if st.session_state.decision_threshold is None:
+            st.session_state.decision_threshold = default_threshold
+        decision_threshold = st.session_state.decision_threshold
     
     # About section
     with st.expander("ℹ️ About This Tool", expanded=False):
@@ -509,7 +515,7 @@ if app_mode == "Applicant View":
     prob_bad, prob_good, source = predict_probability(inputs, model, feature_cols, medians)
     
     # Decision logic
-    decision = "pass" if prob_good >= threshold else "hold"
+    decision = "pass" if prob_good >= decision_threshold else "hold"
     
     # Display results
     st.divider()
@@ -603,13 +609,14 @@ else:  # Loan Officer Review
     with col2:
         utilization = st.number_input(
             "Revolving Utilization Ratio",
-            min_value=0.0,
-            max_value=1.0,
-            value=st.session_state.utilization / 100.0,
-            step=0.05,
-            key="officer_utilization"
+            min_value=0,
+            max_value=100,
+            value=st.session_state.utilization,
+            step=5,
+            key="officer_utilization",
+            help="Percentage of credit limit typically used (0-100%)"
         )
-        st.session_state.utilization = int(utilization * 100)
+        st.session_state.utilization = utilization
         
         inquiries = st.number_input(
             "Inquiries (Last 6M)",
@@ -633,10 +640,12 @@ else:  # Loan Officer Review
             "Decision Threshold",
             min_value=0.3,
             max_value=0.9,
-            value=threshold,
+            value=decision_threshold,
             step=0.05,
-            help="Lower threshold = approve more applicants"
+            help="Lower threshold = approve more applicants",
+            key="officer_threshold"
         )
+        st.session_state.decision_threshold = threshold_lo
         
         st.divider()
         st.markdown("**Model Status**: " + 
@@ -644,13 +653,13 @@ else:  # Loan Officer Review
         
         # Show current applicant summary
         st.markdown("**Applicant Summary:**")
-        st.caption(f"Score: {credit_score}/100 | History: {credit_years}y | Util: {utilization*100:.0f}%")
+        st.caption(f"Score: {credit_score}/100 | History: {credit_years}y | Util: {utilization}%")
     
     # Prepare inputs (only actual model features)
     inputs = {
         'ExternalRiskEstimate': credit_score,
         'MSinceMostRecentDelq': months_since,
-        'NetFractionRevolvingBurden': utilization,
+        'NetFractionRevolvingBurden': utilization / 100.0,  # Convert percentage to ratio
         'NumInqLast6M': inquiries,
         'MaxDelq2PublicRecLast12M': 7
     }
