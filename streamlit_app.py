@@ -1,14 +1,6 @@
 import streamlit as st
-
-st.title("🎈 My new Streamlit app")
-st.write(
-    "Let's start building! For help and inspiration, head over to [docs.streamlit.io](https://docs.streamlit.io/)."
-)
 import os
-import pickle
-import numpy as np
-import pandas as pd
-import streamlit as st
+import sys
 
 st.set_page_config(
     page_title="HELOC Decision Support System", 
@@ -17,21 +9,79 @@ st.set_page_config(
 )
 
 # =========================
-# Load Model
+# Deferred Imports with Error Handling
 # =========================
-MODEL_PATH = "model.pkl"
-
-@st.cache_resource
-def load_model(path: str):
-    if not os.path.exists(path):
-        st.warning("⚠️ Model file not found. Using demo mode.")
+def safe_import(module_name, package_name=None):
+    """Import a module with error handling."""
+    try:
+        if package_name is None:
+            package_name = module_name
+        return __import__(package_name)
+    except ImportError:
         return None
-    with open(path, "rb") as f:
-        return pickle.load(f)
 
-model = load_model(MODEL_PATH)
+# Import core libraries
+np = safe_import('numpy', 'numpy')
+pd = safe_import('pandas', 'pandas')
+joblib = safe_import('joblib', 'joblib')
 
-FEATURE_COLUMNS = [
+# Check critical imports
+if joblib is None:
+    st.error("❌ Critical error: joblib not installed")
+    st.stop()
+
+if np is None or pd is None:
+    st.error("❌ Critical error: numpy or pandas not installed")
+    st.stop()
+
+# Import optional ML libraries
+xgboost = safe_import('xgboost', 'xgboost')
+sklearn = safe_import('sklearn', 'sklearn')
+
+# =========================
+# Load Model from Joblib Files
+# =========================
+@st.cache_resource
+def load_model_artifacts():
+    """Load all model artifacts from joblib files."""
+    artifacts = {
+        'model': None,
+        'feature_cols': None,
+        'medians': None,
+        'threshold': None
+    }
+    
+    try:
+        # Load the trained model
+        if os.path.exists("heloc_model.joblib"):
+            artifacts['model'] = joblib.load("heloc_model.joblib")
+        
+        # Load feature columns
+        if os.path.exists("feature_cols.joblib"):
+            artifacts['feature_cols'] = joblib.load("feature_cols.joblib")
+        
+        # Load medians for imputation
+        if os.path.exists("heloc_medians.joblib"):
+            artifacts['medians'] = joblib.load("heloc_medians.joblib")
+        
+        # Load decision threshold
+        if os.path.exists("heloc_threshold.joblib"):
+            artifacts['threshold'] = joblib.load("heloc_threshold.joblib")
+        
+    except Exception as e:
+        # Silently fail and return empty artifacts
+        pass
+    
+    return artifacts
+
+# Load all artifacts
+artifacts = load_model_artifacts()
+model = artifacts['model']
+feature_cols_from_file = artifacts['feature_cols']
+medians = artifacts['medians']
+threshold = artifacts['threshold']
+
+FEATURE_COLUMNS = feature_cols_from_file if feature_cols_from_file is not None else [
     'ExternalRiskEstimate', 'MSinceOldestTradeOpen', 'MSinceMostRecentTradeOpen',
     'AverageMInFile', 'NumSatisfactoryTrades', 'NumTrades60Ever2DerogPubRec',
     'NumTrades90Ever2DerogPubRec', 'PercentTradesNeverDelq', 'MSinceMostRecentDelq',
@@ -52,7 +102,10 @@ def predict_probability(inputs: dict) -> tuple[float, str]:
     
     X = pd.DataFrame([inputs])[FEATURE_COLUMNS]
     prob_good = float(model.predict_proba(X)[0, 1])
-    decision = "Escalate for Manual Review" if prob_good >= 0.50 else "Auto-Reject"
+    
+    # Use loaded threshold if available, otherwise default to 0.50
+    decision_threshold = threshold if threshold is not None else 0.50
+    decision = "Escalate for Manual Review" if prob_good >= decision_threshold else "Auto-Reject"
     return prob_good, decision
 
 def _demo_predict(inputs: dict) -> tuple[float, str]:
@@ -227,6 +280,13 @@ def get_default_inputs():
 # =========================
 st.title("🏦 HELOC Decision Support System")
 st.markdown("### Machine Learning-Based Application Screening")
+
+# Sidebar info
+st.sidebar.markdown("### 📊 Status")
+if model is not None and feature_cols_from_file is not None:
+    st.sidebar.success("✅ Model loaded")
+else:
+    st.sidebar.warning("⚠️ Demo mode")
 
 mode = st.sidebar.radio(
     "**Select Mode**",
