@@ -263,6 +263,18 @@ def generate_suggestions(inputs: dict, prob_bad: float, credit_years: int = 7) -
 # MAIN APPLICATION LAYOUT
 # ============================================================================
 
+# Initialize session state for cross-mode data sharing
+if 'credit_score' not in st.session_state:
+    st.session_state.credit_score = 82
+if 'credit_years_value' not in st.session_state:
+    st.session_state.credit_years_value = 7
+if 'utilization' not in st.session_state:
+    st.session_state.utilization = 30
+if 'months_since' not in st.session_state:
+    st.session_state.months_since = 24
+if 'inquiries' not in st.session_state:
+    st.session_state.inquiries = 1
+
 # Load model artifacts
 artifacts = load_model_artifacts()
 model = artifacts['model']
@@ -361,7 +373,8 @@ if app_mode == "Applicant View":
                 "Poor (Below 55) - Shows credit challenges"
             ],
             index=1,
-            help="Select the option that best describes your overall credit situation"
+            help="Select the option that best describes your overall credit situation",
+            key="applicant_credit_score"
         )
         credit_score_map = {
             "Excellent (90-100) - Very strong credit history": 95,
@@ -370,6 +383,7 @@ if app_mode == "Applicant View":
             "Poor (Below 55) - Shows credit challenges": 45
         }
         credit_score = credit_score_map[credit_score_option]
+        st.session_state.credit_score = credit_score
         
         # 2. Credit History Length
         st.markdown("**2. Credit History Length**")
@@ -383,7 +397,8 @@ if app_mode == "Applicant View":
                 "15+ years - Extensive history"
             ],
             index=2,
-            help="Select your total credit account history duration"
+            help="Select your total credit account history duration",
+            key="applicant_credit_years"
         )
         credit_years_map = {
             "Less than 2 years - New to credit": 1,
@@ -393,6 +408,7 @@ if app_mode == "Applicant View":
             "15+ years - Extensive history": 20
         }
         credit_years_value = credit_years_map[credit_years]
+        st.session_state.credit_years_value = credit_years_value
         
         # 3. Credit Card Usage
         st.markdown("**3. Credit Card Utilization**")
@@ -406,7 +422,8 @@ if app_mode == "Applicant View":
                 "Very High (81-100%) - High risk"
             ],
             index=0,
-            help="Select how much of your available credit you usually use"
+            help="Select how much of your available credit you usually use",
+            key="applicant_utilization"
         )
         utilization_map = {
             "Very Low (0-20%) - Excellent management": 10,
@@ -416,6 +433,7 @@ if app_mode == "Applicant View":
             "Very High (81-100%) - High risk": 90
         }
         utilization = utilization_map[utilization_option]
+        st.session_state.utilization = utilization
     
     with col2:
         # 4. Payment History - Recent Issues
@@ -424,7 +442,8 @@ if app_mode == "Applicant View":
             "Have you had any payment issues?",
             options=list(DELINQUENCY_LABELS.values()),
             index=0,
-            help="Select your worst payment status in the last 12 months"
+            help="Select your worst payment status in the last 12 months",
+            key="applicant_recent_delinq"
         )
         
         # 5. Time Since Last Payment Problem
@@ -440,7 +459,8 @@ if app_mode == "Applicant View":
                 "3+ years ago - Long time ago"
             ],
             index=0,
-            help="Select how long ago you had your most recent payment problem"
+            help="Select how long ago you had your most recent payment problem",
+            key="applicant_months_since"
         )
         months_since_map = {
             "Never had payment issues - Perfect record": -7,
@@ -451,6 +471,7 @@ if app_mode == "Applicant View":
             "3+ years ago - Long time ago": 48
         }
         months_since = months_since_map[months_since_option]
+        st.session_state.months_since = months_since
         
         # 6. Credit Inquiries
         st.markdown("**6. Recent Credit Inquiries** (Last 6 months)")
@@ -463,7 +484,8 @@ if app_mode == "Applicant View":
                 "6+ - Multiple recent applications"
             ],
             index=0,
-            help="Number of times lenders checked your credit recently"
+            help="Number of times lenders checked your credit recently",
+            key="applicant_inquiries"
         )
         inquiries_map = {
             "None (0) - No new credit applications": 0,
@@ -472,6 +494,7 @@ if app_mode == "Applicant View":
             "6+ - Multiple recent applications": 7
         }
         inquiries = inquiries_map[inquiries_option]
+        st.session_state.inquiries = inquiries
     
     # Inputs for the model (only actual model features)
     inputs = {
@@ -540,7 +563,11 @@ if app_mode == "Applicant View":
 
 else:  # Loan Officer Review
     st.header("🔧 Loan Officer Advanced Review")
-    st.markdown("Detailed screening analysis with adjustable decision threshold.")
+    st.markdown("📋 Data carried over from Applicant View (if available). Adjust values as needed for detailed review.")
+    
+    # Show if data is from applicant or default
+    if st.session_state.credit_score != 82:  # Was changed from default
+        st.info("✓ Applicant data loaded from screening. You can modify values below for detailed review.")
     
     # Input form with more details
     col1, col2, col3 = st.columns(3)
@@ -550,43 +577,54 @@ else:  # Loan Officer Review
             "External Risk Estimate",
             min_value=0,
             max_value=100,
-            value=70
+            value=st.session_state.credit_score,
+            key="officer_credit_score"
         )
+        st.session_state.credit_score = credit_score
         
         credit_years = st.number_input(
             "Credit History (years)",
             min_value=0,
             max_value=80,
-            value=10
+            value=st.session_state.credit_years_value,
+            key="officer_credit_years"
         )
+        st.session_state.credit_years_value = credit_years
         
         months_since = st.number_input(
             "Months Since Delinquency",
             min_value=-7,
             max_value=120,
-            value=24
+            value=st.session_state.months_since,
+            key="officer_months_since"
         )
+        st.session_state.months_since = months_since
     
     with col2:
         utilization = st.number_input(
             "Revolving Utilization Ratio",
             min_value=0.0,
             max_value=1.0,
-            value=0.25,
-            step=0.05
+            value=st.session_state.utilization / 100.0,
+            step=0.05,
+            key="officer_utilization"
         )
+        st.session_state.utilization = int(utilization * 100)
         
         inquiries = st.number_input(
             "Inquiries (Last 6M)",
             min_value=0,
             max_value=20,
-            value=1
+            value=st.session_state.inquiries,
+            key="officer_inquiries"
         )
+        st.session_state.inquiries = inquiries
         
         delinq_status = st.selectbox(
             "Recent Delinquency Status",
             options=list(DELINQUENCY_LABELS.values()),
-            index=0
+            index=0,
+            key="officer_delinq"
         )
     
     with col3:
@@ -596,12 +634,17 @@ else:  # Loan Officer Review
             min_value=0.3,
             max_value=0.9,
             value=threshold,
-            step=0.05
+            step=0.05,
+            help="Lower threshold = approve more applicants"
         )
         
         st.divider()
         st.markdown("**Model Status**: " + 
                    ("🤖 Production" if model_mode == 'production' else "📊 Demo"))
+        
+        # Show current applicant summary
+        st.markdown("**Applicant Summary:**")
+        st.caption(f"Score: {credit_score}/100 | History: {credit_years}y | Util: {utilization*100:.0f}%")
     
     # Prepare inputs (only actual model features)
     inputs = {
