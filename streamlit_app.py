@@ -49,8 +49,9 @@ def load_model_artifacts():
     """Load model artifacts with graceful fallback to demo mode."""
     artifacts = {
         'model': None,
-        'threshold': 0.80,
+        'threshold': 0.6944,
         'feature_cols': None,
+        'medians': None,
         'mode': 'demo'
     }
     
@@ -66,10 +67,14 @@ def load_model_artifacts():
         if os.path.exists("feature_cols.joblib"):
             artifacts['feature_cols'] = joblib.load("feature_cols.joblib")
             
+        # Load median values for imputation
+        if os.path.exists("heloc_medians.joblib"):
+            artifacts['medians'] = joblib.load("heloc_medians.joblib")
+            
         # Load threshold if available
         if os.path.exists("heloc_threshold.joblib"):
             threshold = joblib.load("heloc_threshold.joblib")
-            artifacts['threshold'] = float(threshold) if threshold else 0.80
+            artifacts['threshold'] = float(threshold) if threshold else 0.6944
             
     except Exception as e:
         st.warning(f"Could not load production model: {str(e)}")
@@ -100,9 +105,10 @@ DELINQUENCY_LABELS = {
 # PREDICTION FUNCTIONS
 # ============================================================================
 
-def predict_probability(inputs: dict, model, feature_names) -> tuple:
+def predict_probability(inputs: dict, model, feature_names, medians=None) -> tuple:
     """
     Predict probability of loan performance.
+    Uses median imputation for missing features.
     
     Returns:
         (probability_bad, probability_good, decision)
@@ -113,11 +119,23 @@ def predict_probability(inputs: dict, model, feature_names) -> tuple:
     try:
         import pandas as pd
         
-        # Create dataframe with correct column order
-        df_input = pd.DataFrame([inputs])
+        # Start with median values for all features
+        if medians is not None:
+            full_inputs = medians.copy()
+        else:
+            full_inputs = {}
         
-        # Ensure columns match model training
-        if feature_names:
+        # Override with user-provided values
+        full_inputs.update(inputs)
+        
+        # Create dataframe with correct column order
+        df_input = pd.DataFrame([full_inputs])
+        
+        # Ensure columns match model training (correct order & features)
+        if feature_names and isinstance(feature_names, list):
+            # Select only the features the model knows about
+            df_input = df_input[[f for f in feature_names if f in df_input.columns]]
+            # Ensure correct column order
             df_input = df_input[feature_names]
         
         # Get probability of positive class (good = 1)
@@ -136,18 +154,7 @@ def demo_predict(inputs: dict) -> tuple:
     Returns (probability_bad, probability_good, source)
     """
     # Start with base score from credit risk estimate
-    score = 1.0 - (inputs['ExternalRiskEstimate'] / 100.0) * 0.4
-    
-    # Factor in credit history (longer = better)
-    credit_years = inputs.get('Credit_History_Years', 10)
-    if credit_years >= 15:
-        score -= 0.15
-    elif credit_years >= 10:
-        score -= 0.10
-    elif credit_years >= 5:
-        score -= 0.05
-    else:
-        score += 0.05
+    score = 1.0 - (inputs.get('ExternalRiskEstimate', 70) / 100.0) * 0.4
     
     # Factor in recent delinquency
     months_since = inputs.get('MSinceMostRecentDelq', 24)
@@ -227,7 +234,7 @@ def generate_explanations(inputs: dict, prob_bad: float, prob_good: float) -> li
     return explanations[:4]  # Return top 4
 
 
-def generate_suggestions(inputs: dict, prob_bad: float) -> list:
+def generate_suggestions(inputs: dict, prob_bad: float, credit_years: int = 7) -> list:
     """Generate improvement suggestions for the applicant."""
     suggestions = []
     
@@ -244,7 +251,7 @@ def generate_suggestions(inputs: dict, prob_bad: float) -> list:
         )
     
     # Credit history
-    if inputs.get('Credit_History_Years', 0) < 5:
+    if credit_years < 5:
         suggestions.append(
             "Continue building credit history through responsible account management"
         )
@@ -260,7 +267,8 @@ def generate_suggestions(inputs: dict, prob_bad: float) -> list:
 artifacts = load_model_artifacts()
 model = artifacts['model']
 default_threshold = artifacts['threshold']
-feature_cols = artifacts['feature_columns'] if 'feature_columns' in artifacts else None
+feature_cols = artifacts['feature_cols']  # Fixed: was 'feature_columns'
+medians = artifacts['medians']
 model_mode = artifacts['mode']
 
 # Sidebar - Mode selection and settings
@@ -405,17 +413,19 @@ if app_mode == "Applicant View":
         "15+ years": 20
     }
     
+    credit_years_value = credit_years_map[credit_years]
+    
+    # Inputs for the model (only actual model features)
     inputs = {
         'ExternalRiskEstimate': credit_score,
-        'Credit_History_Years': credit_years_map[credit_years],
         'MSinceMostRecentDelq': months_since,
         'NetFractionRevolvingBurden': utilization / 100.0,
         'NumInqLast6M': inquiries,
         'MaxDelq2PublicRecLast12M': 7  # Default for demo
     }
     
-    # Generate prediction
-    prob_bad, prob_good, source = predict_probability(inputs, model, feature_cols)
+    # Generate prediction (medians will fill missing features)
+    prob_bad, prob_good, source = predict_probability(inputs, model, feature_cols, medians)
     
     # Decision logic
     decision = "pass" if prob_good >= threshold else "hold"
@@ -454,7 +464,7 @@ if app_mode == "Applicant View":
     # Display suggestions
     if decision == "hold":
         st.subheader("💡 How to Strengthen Your Application")
-        suggestions = generate_suggestions(inputs, prob_bad)
+        suggestions = generate_suggestions(inputs, prob_bad, credit_years_value)
         for i, sug in enumerate(suggestions, 1):
             st.write(f"{i}. {sug}")
     
@@ -535,18 +545,17 @@ else:  # Loan Officer Review
         st.markdown("**Model Status**: " + 
                    ("🤖 Production" if model_mode == 'production' else "📊 Demo"))
     
-    # Prepare inputs
+    # Prepare inputs (only actual model features)
     inputs = {
         'ExternalRiskEstimate': credit_score,
-        'Credit_History_Years': credit_years,
         'MSinceMostRecentDelq': months_since,
         'NetFractionRevolvingBurden': utilization,
         'NumInqLast6M': inquiries,
         'MaxDelq2PublicRecLast12M': 7
     }
     
-    # Generate prediction
-    prob_bad, prob_good, source = predict_probability(inputs, model, feature_cols)
+    # Generate prediction (medians will fill missing features)
+    prob_bad, prob_good, source = predict_probability(inputs, model, feature_cols, medians)
     
     # Decision
     decision = "approve" if prob_good >= threshold_lo else "deny"
