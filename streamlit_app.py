@@ -158,14 +158,16 @@ def demo_predict(inputs: dict) -> tuple:
     
     # Factor in recent delinquency
     months_since = inputs.get('MSinceMostRecentDelq', 24)
-    if months_since >= 36:
+    if months_since < 0:  # Never had payment issues
+        score -= 0.15  # Perfect record = best outcome
+    elif months_since >= 36:
         score -= 0.10
     elif months_since >= 12:
         score -= 0.05
     elif months_since >= 0:
         score += 0.20
     else:
-        score -= 0.25  # Current or recent
+        score -= 0.25  # Current or very recent
     
     # Factor in utilization (higher = worse)
     utilization = inputs.get('NetFractionRevolvingBurden', 0.3)
@@ -203,7 +205,11 @@ def generate_explanations(inputs: dict, prob_bad: float, prob_good: float) -> li
     
     # Delinquency history
     months_since = inputs.get('MSinceMostRecentDelq', 24)
-    if months_since >= 36:
+    if months_since < 0:  # Never had payment issues
+        explanations.append(
+            "✓ Perfect payment record - no delinquency history demonstrates excellent reliability"
+        )
+    elif months_since >= 36:
         explanations.append(
             "✓ Sufficient time passed since last payment issue indicates reliability"
         )
